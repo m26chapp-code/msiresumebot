@@ -1,0 +1,37 @@
+services:
+  - type: web
+    name: telegram-resume-bot
+    env: python
+    plan: free
+    pythonVersion: "3.11"
+    buildCommand: "pip install --upgrade pip && pip install -r requirements.txt"
+    startCommand: "gunicorn --workers 4 --bind 0.0.0.0:10000 bot:app"
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: WEBHOOK_HOST
+        fromService:
+          type: web
+          name: telegram-resume-bot
+          property: url
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: GOOGLE_SHEET_ID
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_TOKEN_JSON # Optional: can be set after first OAuth flow
+        sync: false
+      - key: CC_CLIENT_ID
+        sync: false
+      - key: CC_CLIENT_SECRET
+        sync: false
+      - key: CC_LIST_ID
+        sync: false
+      - key: CC_TOKEN_JSON # Optional: can be set after first OAuth flow
+        sync: false
