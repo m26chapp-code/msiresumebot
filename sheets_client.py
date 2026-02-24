@@ -76,16 +76,19 @@ def _get_credentials() -> Credentials:
     return creds
 
 
-def _save_token(creds: Credentials):
-    """Persist refreshed credentials back to token.json and env var."""
-    token_data = {
-        "token": creds.token,
-        "refresh_token": creds.refresh_token,
-        "token_uri": creds.token_uri,
-        "client_id": creds.client_id,
-        "client_secret": creds.client_secret,
-        "scopes": list(creds.scopes) if creds.scopes else SCOPES,
-    }
+def _save_token(creds):
+    """Persist credentials to token.json and env var. Accepts Credentials object or plain dict."""
+    if isinstance(creds, dict):
+        token_data = creds
+    else:
+        token_data = {
+            "token": creds.token,
+            "refresh_token": creds.refresh_token,
+            "token_uri": creds.token_uri,
+            "client_id": creds.client_id,
+            "client_secret": creds.client_secret,
+            "scopes": list(creds.scopes) if creds.scopes else SCOPES,
+        }
     token_path = os.path.join(os.path.dirname(__file__), "token.json")
     with open(token_path, "w") as f:
         json.dump(token_data, f, indent=2)
