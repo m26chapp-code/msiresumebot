@@ -183,11 +183,18 @@ def _process_file(chat_id: int, file_id: str, ext: str):
             f"🎓 *School:* {school}\n"
             f"📋 *Classification:* {classification}\n\n"
             f"{sheets_status}\n"
-            f"{cc_status}\n\n"
-            f"*Extracted JSON:*\n"
-            f"```\n{json.dumps(result, indent=2)[:3000]}\n```"
+            f"{cc_status}"
         )
         _send_message(chat_id, summary)
+
+        # Send JSON separately to avoid Telegram 4096 char limit
+        json_str = json.dumps(result, indent=2)
+        # Split into chunks of 3800 chars if needed
+        chunk_size = 3800
+        chunks = [json_str[i:i+chunk_size] for i in range(0, len(json_str), chunk_size)]
+        for i, chunk in enumerate(chunks):
+            label = "*Extracted JSON:*" if i == 0 else f"*JSON (cont. {i+1}):*"
+            _send_message(chat_id, f"{label}\n```\n{chunk}\n```")
 
     except Exception as e:
         log.error("Processing error: %s\n%s", e, traceback.format_exc())
