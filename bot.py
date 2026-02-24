@@ -125,6 +125,50 @@ def debug():
     }), 200
 
 
+# ── CC test endpoint — sends a real test contact and shows raw API response ────
+@app.route("/cc_test", methods=["GET"])
+def cc_test():
+    import json as _json
+    from cc_client import get_access_token, _get_custom_field_id, _load_custom_field_cache, CC_API_BASE, CC_LIST_ID
+
+    try:
+        token = get_access_token()
+    except Exception as e:
+        return jsonify({"error": f"Token error: {str(e)}"}), 500
+
+    # Load custom fields and show what's available
+    _load_custom_field_cache()
+    from cc_client import _CUSTOM_FIELD_CACHE
+
+    # Try a minimal contact payload
+    payload = {
+        "email_address": {
+            "address": "test.resume.bot@example.com",
+            "permission_to_send": "implicit"
+        },
+        "first_name": "Test",
+        "last_name": "Candidate",
+        "list_memberships": [CC_LIST_ID],
+    }
+
+    resp = requests.post(
+        f"{CC_API_BASE}/contacts",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=30,
+    )
+
+    return jsonify({
+        "status_code": resp.status_code,
+        "response": resp.json() if resp.content else {},
+        "available_custom_fields": list(_CUSTOM_FIELD_CACHE.keys()),
+        "list_id_used": CC_LIST_ID,
+    }), 200
+
+
 # ── Telegram webhook ──────────────────────────────────────────────────────────
 @app.route("/webhook", methods=["POST"])
 def webhook():
