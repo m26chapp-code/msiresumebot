@@ -10,10 +10,7 @@ services:
       - key: PYTHON_VERSION
         value: "3.11.0"
       - key: WEBHOOK_HOST
-        fromService:
-          type: web
-          name: telegram-resume-bot
-          property: url
+        sync: false
       - key: OPENAI_API_KEY
         sync: false
       - key: TELEGRAM_TOKEN
