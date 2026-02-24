@@ -146,6 +146,7 @@ def cc_test():
             "address": "test.resume.bot@example.com",
             "permission_to_send": "implicit"
         },
+        "create_source": "Contact",
         "first_name": "Test",
         "last_name": "Candidate",
         "list_memberships": [CC_LIST_ID],
