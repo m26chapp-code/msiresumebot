@@ -67,6 +67,64 @@ def health():
     return jsonify({"status": "ok"}), 200
 
 
+# ── Debug endpoint — shows token status and current env var values ─────────────
+@app.route("/debug", methods=["GET"])
+def debug():
+    import json as _json
+
+    google_token_env = os.environ.get("GOOGLE_TOKEN_JSON", "")
+    cc_token_env = os.environ.get("CC_TOKEN_JSON", "")
+
+    # Also check disk
+    base = os.path.dirname(os.path.abspath(__file__))
+    google_disk = os.path.exists(os.path.join(base, "token.json"))
+    cc_disk = os.path.exists(os.path.join(base, "cc_token.json"))
+
+    google_token_data = {}
+    cc_token_data = {}
+
+    if google_token_env:
+        try:
+            google_token_data = _json.loads(google_token_env)
+        except Exception:
+            pass
+    elif google_disk:
+        try:
+            with open(os.path.join(base, "token.json")) as f:
+                google_token_data = _json.load(f)
+        except Exception:
+            pass
+
+    if cc_token_env:
+        try:
+            cc_token_data = _json.loads(cc_token_env)
+        except Exception:
+            pass
+    elif cc_disk:
+        try:
+            with open(os.path.join(base, "cc_token.json")) as f:
+                cc_token_data = _json.load(f)
+        except Exception:
+            pass
+
+    return jsonify({
+        "google": {
+            "env_var_set": bool(google_token_env),
+            "file_on_disk": google_disk,
+            "has_access_token": bool(google_token_data.get("token")),
+            "has_refresh_token": bool(google_token_data.get("refresh_token")),
+            "token_json_for_env": google_token_data,  # copy this into GOOGLE_TOKEN_JSON env var
+        },
+        "constant_contact": {
+            "env_var_set": bool(cc_token_env),
+            "file_on_disk": cc_disk,
+            "has_access_token": bool(cc_token_data.get("access_token")),
+            "has_refresh_token": bool(cc_token_data.get("refresh_token")),
+            "token_json_for_env": cc_token_data,  # copy this into CC_TOKEN_JSON env var
+        }
+    }), 200
+
+
 # ── Telegram webhook ──────────────────────────────────────────────────────────
 @app.route("/webhook", methods=["POST"])
 def webhook():
