@@ -4,9 +4,12 @@ Handles Constant Contact v3 OAuth token management and contact creation/update.
 """
 
 import json
+import logging
 import os
 import time
 import requests
+
+log = logging.getLogger(__name__)
 
 # ── Constant Contact credentials ──────────────────────────────────────────────
 CC_CLIENT_ID = os.environ.get("CC_CLIENT_ID", "5b382762-e89c-41b3-9035-596b89990425")
@@ -16,7 +19,6 @@ CC_TOKEN_URL = "https://authz.constantcontact.com/oauth2/default/v1/token"
 CC_API_BASE = "https://api.cc.email/v3"
 
 # Custom field name → Constant Contact custom_field_id mapping
-# These will be resolved at runtime via the API if not set in env
 _CUSTOM_FIELD_CACHE: dict = {}
 
 
@@ -56,7 +58,6 @@ def _refresh_access_token(refresh_token: str) -> dict:
     )
     resp.raise_for_status()
     new_token = resp.json()
-    # Merge with existing to preserve refresh_token if not returned
     existing = _load_token()
     if "refresh_token" not in new_token and existing.get("refresh_token"):
         new_token["refresh_token"] = existing["refresh_token"]
@@ -73,47 +74,70 @@ def get_access_token() -> str:
             "No Constant Contact token found. "
             "Run the OAuth flow first (visit /cc_auth on the bot server)."
         )
-
-    # Check expiry (with 60s buffer)
     obtained_at = token_data.get("obtained_at", 0)
     expires_in = token_data.get("expires_in", 86400)
     if int(time.time()) >= obtained_at + expires_in - 60:
         token_data = _refresh_access_token(token_data["refresh_token"])
-
     return token_data["access_token"]
 
 
 # ── Custom field resolution ───────────────────────────────────────────────────
 
-def _get_custom_field_id(label: str) -> str | None:
-    """
-    Look up the custom_field_id for a given label name.
-    Results are cached for the lifetime of the process.
-    """
+def _load_custom_field_cache():
+    """Fetch all custom fields from CC and populate the cache."""
     global _CUSTOM_FIELD_CACHE
-    if label in _CUSTOM_FIELD_CACHE:
-        return _CUSTOM_FIELD_CACHE[label]
-
     token = get_access_token()
     resp = requests.get(
         f"{CC_API_BASE}/contact_custom_fields",
         headers={"Authorization": f"Bearer {token}"},
         timeout=30,
     )
-    if resp.status_code != 200:
-        return None
+    if resp.status_code == 200:
+        for field in resp.json().get("custom_fields", []):
+            # Cache by both label and name for flexibility
+            _CUSTOM_FIELD_CACHE[field.get("label", "")] = field["custom_field_id"]
+            _CUSTOM_FIELD_CACHE[field.get("name", "")] = field["custom_field_id"]
+        log.info("CC custom fields loaded: %s", list(_CUSTOM_FIELD_CACHE.keys()))
+    else:
+        log.warning("Could not load CC custom fields: %s %s", resp.status_code, resp.text)
 
-    for field in resp.json().get("custom_fields", []):
-        _CUSTOM_FIELD_CACHE[field["label"]] = field["custom_field_id"]
 
+def _get_custom_field_id(label: str) -> str | None:
+    """
+    Look up the custom_field_id for a given label name.
+    Refreshes the full cache on first miss.
+    """
+    global _CUSTOM_FIELD_CACHE
+    if label in _CUSTOM_FIELD_CACHE:
+        return _CUSTOM_FIELD_CACHE[label]
+    # Refresh cache and try again
+    _load_custom_field_cache()
     return _CUSTOM_FIELD_CACHE.get(label)
+
+
+# ── Name splitting helper ─────────────────────────────────────────────────────
+
+def _split_name(first: str, last: str) -> tuple[str, str]:
+    """
+    If last name is empty but first name contains a space,
+    split it into first and last automatically.
+    """
+    first = (first or "").strip()
+    last = (last or "").strip()
+
+    if not last and " " in first:
+        parts = first.split()
+        first = parts[0]
+        last = " ".join(parts[1:])
+
+    return first, last
 
 
 # ── Contact creation / update ─────────────────────────────────────────────────
 
 def upsert_contact(cc_data: dict) -> dict:
     """
-    Create or update a Constant Contact contact.
+    Create or update a Constant Contact contact using the standard /contacts endpoint.
 
     Args:
         cc_data: The ConstantContact dict from resume_extractor.extract_resume_data()
@@ -126,7 +150,13 @@ def upsert_contact(cc_data: dict) -> dict:
     contact_fields = cc_data.get("ContactFields", {})
     custom_fields_data = cc_data.get("CustomFields", {})
 
-    # Build custom_fields list
+    # ── Fix name splitting ────────────────────────────────────────────────────
+    first_name, last_name = _split_name(
+        contact_fields.get("FirstName", ""),
+        contact_fields.get("LastName", "")
+    )
+
+    # ── Build custom_fields list ──────────────────────────────────────────────
     custom_fields = []
     for label, value in custom_fields_data.items():
         if not value:
@@ -137,8 +167,10 @@ def upsert_contact(cc_data: dict) -> dict:
                 "custom_field_id": field_id,
                 "value": str(value)
             })
+        else:
+            log.warning("CC custom field not found for label: '%s'. Available: %s", label, list(_CUSTOM_FIELD_CACHE.keys()))
 
-    # Build phone numbers list
+    # ── Build phone numbers list ──────────────────────────────────────────────
     phone_numbers = []
     if contact_fields.get("Phone"):
         phone_numbers.append({
@@ -146,32 +178,37 @@ def upsert_contact(cc_data: dict) -> dict:
             "kind": "mobile"
         })
 
-    # Build street addresses list
+    # ── Build street addresses list ───────────────────────────────────────────
     street_addresses = []
-    if contact_fields.get("City") or contact_fields.get("State"):
+    city = (contact_fields.get("City") or "").strip()
+    state = (contact_fields.get("State") or "").strip()
+    if city or state:
         street_addresses.append({
             "kind": "home",
-            "city": contact_fields.get("City", ""),
-            "state": contact_fields.get("State", ""),
+            "city": city,
+            "state": state,
             "country": "US"
         })
 
+    # ── Build full payload ────────────────────────────────────────────────────
     payload = {
         "email_address": {
             "address": contact_fields.get("Email", ""),
             "permission_to_send": "implicit"
         },
-        "first_name": contact_fields.get("FirstName", ""),
-        "last_name": contact_fields.get("LastName", ""),
+        "first_name": first_name,
+        "last_name": last_name,
         "phone_numbers": phone_numbers,
         "street_addresses": street_addresses,
         "list_memberships": [CC_LIST_ID],
         "custom_fields": custom_fields,
     }
 
-    # Use the "create or update" (UPSERT) endpoint
+    log.info("CC payload: %s", json.dumps(payload, indent=2))
+
+    # ── Try standard POST /contacts (create or update by email) ──────────────
     resp = requests.post(
-        f"{CC_API_BASE}/contacts/sign_up_form",
+        f"{CC_API_BASE}/contacts",
         headers={
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
@@ -180,21 +217,7 @@ def upsert_contact(cc_data: dict) -> dict:
         timeout=30,
     )
 
-    if resp.status_code not in (200, 201):
-        # Fallback: try standard create endpoint
-        resp2 = requests.post(
-            f"{CC_API_BASE}/contacts",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=30,
-        )
-        return {
-            "status_code": resp2.status_code,
-            "response": resp2.json() if resp2.content else {}
-        }
+    log.info("CC response %s: %s", resp.status_code, resp.text[:500])
 
     return {
         "status_code": resp.status_code,
