@@ -190,12 +190,13 @@ def upsert_contact(cc_data: dict) -> dict:
             "country": "US"
         })
 
-    # ── Build full payload ────────────────────────────────────────────────────
+     # ── Build full payload ────────────────────────────────────────────
     payload = {
         "email_address": {
             "address": contact_fields.get("Email", ""),
             "permission_to_send": "implicit"
         },
+        "create_source": "Contact",
         "first_name": first_name,
         "last_name": last_name,
         "phone_numbers": phone_numbers,
