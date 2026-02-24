@@ -46,11 +46,13 @@ Use EXACTLY these field names and rules:
 }
 
 RULES:
-- First Name / Last Name: Split full name; ignore middle names.
+- First Name: ONLY the first given name. Never include middle name or last name here.
+- Last Name: ONLY the family/surname. Never leave this empty if a full name is present.
 - Email: Extract email address. If missing, use "Not Provided".
-- Phone: Extract phone number. If missing, leave empty.
-- City / State: Extract from address or header. If missing, leave empty.
-- College / University: Full name, no abbreviations unless written that way.
+- Phone: Extract phone number including area code. If missing, leave empty.
+- City: Extract city from any address, header, or contact section. If missing, leave empty.
+- State: Extract 2-letter US state abbreviation from any address, header, or contact section. If missing, leave empty.
+- College / University: Full institution name. No abbreviations unless that is how it is written on the resume. This is REQUIRED — look carefully for any university, college, or school name.
 - Expected Graduation Year: Convert "Class of 2026" → "2026". Use most recent degree. If already graduated, still include the year.
 - Degree: e.g. "Bachelor of Science", "MBA", "Associate of Arts".
 - Major: Field of study.
@@ -124,6 +126,14 @@ def extract_resume_data(file_path: str) -> dict:
     raw = re.sub(r"\s*```$", "", raw)
 
     extracted = json.loads(raw)
+
+    # Post-extraction: fix name splitting if AI put full name in First Name
+    first = (extracted.get("First Name") or "").strip()
+    last = (extracted.get("Last Name") or "").strip()
+    if first and not last and " " in first:
+        parts = first.split()
+        extracted["First Name"] = parts[0]
+        extracted["Last Name"] = " ".join(parts[1:])
 
     # Ensure required fields
     for req in ["First Name", "Last Name", "Email"]:
